@@ -102,7 +102,7 @@
     .card { box-shadow: none; border: 1px solid #ccc; margin-bottom: 8px; padding: 10px; border-radius: 0; }
     input, select, textarea { border: none; background: transparent; padding: 1px; }
     .drug-table tbody tr:hover { background: none; }
-    .drug-row.unchecked { display: none; }
+    .drug-row.unchecked { display: none !important; }
     .checked-row { background: none !important; }
     .tabs { display: none; }
     .tab-panel { display: block !important; }
@@ -110,6 +110,13 @@
     .brand-select { display: none; }
     .print-brand { display: inline !important; color: #1a6b2a; }
     h1 { font-size: 1rem; }
+    /* Hide entire tab panel if no checked drugs in it */
+    .tab-panel:not(:has(.drug-row:not(.unchecked))) { display: none !important; }
+    /* Remove gap between rows - sequential layout */
+    .drug-table { border-collapse: collapse; }
+    .drug-table tbody tr { border-bottom: 1px solid #ccc; }
+    /* Serial number column */
+    .sr-no { display: table-cell !important; }
   }
 </style>
 </head>
@@ -171,8 +178,15 @@
       <div id="customDrugList"></div>
     </div>
     <div id="customPrintSection" style="display:none">
-      <table class="drug-table">
-        <thead><tr><th>Drug / Brand</th><th>Dose</th><th>Frequency</th><th>Duration</th><th>Instructions</th></tr></thead>
+      <table class="drug-table" style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+        <thead><tr style="background:#1a5276;color:#fff;">
+          <th style="width:28px;padding:7px 6px">#</th>
+          <th style="padding:7px 8px">Drug Name (Brand)</th>
+          <th style="padding:7px 8px;width:100px">Dose</th>
+          <th style="padding:7px 8px;width:85px">Frequency</th>
+          <th style="padding:7px 8px;width:80px">Duration</th>
+          <th style="padding:7px 8px">Instructions</th>
+        </tr></thead>
         <tbody id="customPrintBody"></tbody>
       </table>
     </div>
@@ -522,33 +536,75 @@ function uncheckAll() {
 }
 
 function printRx() {
-  // Sync brand print spans for preset drugs
+  // Sync brand print spans
   document.querySelectorAll('[id^="brandsel_"]').forEach(sel => {
     const gid = sel.id.replace('brandsel_', '');
     const printSpan = document.getElementById('brandprint_' + gid);
-    if (printSpan) {
-      printSpan.textContent = sel.value;
-      printSpan.style.display = 'inline';
-    }
+    if (printSpan) { printSpan.textContent = sel.value; printSpan.style.display = 'inline'; }
   });
 
   document.getElementById('notesPrintText').innerText = document.getElementById('notes').value || '—';
   document.getElementById('notesPrint').style.display = 'block';
 
+  // Mark unchecked rows
   document.querySelectorAll('.drug-row').forEach(row => {
     const chk = row.querySelector('input[type=checkbox]');
     row.classList.toggle('unchecked', !(chk && chk.checked));
   });
 
-  const checked = customDrugs.filter(d => d.checked);
+  // Build a single unified sequential print table of ALL checked drugs
+  const allChecked = [];
+
+  // Collect from preset tabs
+  DRUGS.forEach((d, di) => {
+    // find the row for this drug
+    const cat = d.cat;
+    const catDrugs = DRUGS.filter(x => x.cat === cat);
+    const li = catDrugs.indexOf(d);
+    const gid = cat + '_' + li;
+    const chk = document.getElementById('chk_' + gid);
+    if (chk && chk.checked) {
+      const brandSel = document.getElementById('brandsel_' + gid);
+      const dose = document.getElementById('dose_' + gid);
+      const freq = document.getElementById('freq_' + gid);
+      const dur = document.getElementById('dur_' + gid);
+      const inst = document.getElementById('inst_' + gid);
+      allChecked.push({
+        name: d.name,
+        brand: brandSel ? brandSel.value : d.brands[0],
+        dose: dose ? dose.value : d.dose,
+        freq: freq ? freq.value : d.freq,
+        dur: dur ? dur.value : d.dur,
+        inst: inst ? inst.value : d.inst,
+      });
+    }
+  });
+
+  // Collect from custom drugs
+  customDrugs.filter(d => d.checked).forEach(d => {
+    allChecked.push({ name: d.name, brand: d.selectedBrand, dose: d.dose, freq: d.freq, dur: d.dur, inst: d.inst });
+  });
+
+  // Build unified print section
   const cpSection = document.getElementById('customPrintSection');
   const cpBody = document.getElementById('customPrintBody');
-  if (checked.length) {
-    cpBody.innerHTML = checked.map(d =>
-      `<tr><td><span class="print-drug-name">${d.name}</span> <span class="print-brand">(${d.selectedBrand})</span></td><td>${d.dose}</td><td>${d.freq}</td><td>${d.dur}</td><td>${d.inst}</td></tr>`
+  if (allChecked.length) {
+    cpBody.innerHTML = allChecked.map((d, i) =>
+      `<tr>
+        <td style="width:28px;font-weight:700;color:#1a5276">${i + 1}.</td>
+        <td><strong>${d.name}</strong> <span style="color:#1a6b2a;font-style:italic;font-size:0.85em">(${d.brand})</span></td>
+        <td>${d.dose}</td>
+        <td>${d.freq}</td>
+        <td>${d.dur}</td>
+        <td>${d.inst}</td>
+      </tr>`
     ).join('');
     cpSection.style.display = 'block';
   }
+
+  // Hide all preset tab panels during print — we use unified table instead
+  document.querySelectorAll('#tabPanels .tab-panel').forEach(p => p.setAttribute('data-hidden', '1'));
+  document.querySelectorAll('#tabPanels .tab-panel').forEach(p => p.style.display = 'none');
 
   window.print();
 
@@ -557,6 +613,8 @@ function printRx() {
     cpSection.style.display = 'none';
     document.querySelectorAll('.drug-row').forEach(r => r.classList.remove('unchecked'));
     document.querySelectorAll('[id^="brandprint_"]').forEach(s => s.style.display = 'none');
+    document.querySelectorAll('#tabPanels .tab-panel').forEach(p => p.style.display = '');
+    switchTab(activeTab);
   }, 1200);
 }
 
